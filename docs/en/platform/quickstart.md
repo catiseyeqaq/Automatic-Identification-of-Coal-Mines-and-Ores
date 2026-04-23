@@ -74,9 +74,9 @@ Every new account receives free credits for cloud GPU training:
 
 The onboarding flow guides you through three steps:
 
-1. **Username** — Choose a unique username (permanent, cannot be changed later)
-2. **Data Region** — Select US, EU, or AP with a visual world map showing latency
-3. **Profile** — Set your display name, company, and primary use case
+1. **Profile** - Enter your display name, unique username (permanent, cannot be changed later), organization (optional), and primary use case
+2. **Data Region** - Select US, EU, or AP with a visual world map showing latency
+3. **Complete** - Review your selections, optionally apply a promo code, and finish signup to claim your welcome credits
 
 ![Ultralytics Platform Onboarding Profile With Use Case](https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/platform/platform-onboarding-profile-with-use-case.avif)
 
