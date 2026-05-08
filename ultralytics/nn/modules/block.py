@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
-from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
+from .conv import Conv, DWConv, GhostConv, LightConv, PConv, RepConv, autopad
 from .transformer import TransformerBlock
 
 __all__ = (
@@ -34,6 +34,7 @@ __all__ = (
     "C2f",
     "C2fAttn",
     "C2fCIB",
+    "C2fFaster",
     "C2fPSA",
     "C3Ghost",
     "C3k2",
@@ -42,6 +43,7 @@ __all__ = (
     "CBLinear",
     "ContrastiveHead",
     "GhostBottleneck",
+    "FasterBottleneck",
     "HGBlock",
     "HGStem",
     "ImagePoolingAttn",
@@ -319,6 +321,15 @@ class C2f(nn.Module):
         return self.cv2(torch.cat(y, 1))
 
 
+class C2fFaster(C2f):
+    """C2f block with FasterNet-style partial-convolution bottlenecks."""
+
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = False, g: int = 1, e: float = 0.5, n_div: int = 4):
+        """Initialize C2fFaster with the same interface as C2f plus PConv split ratio."""
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(FasterBottleneck(self.c, self.c, shortcut, g, e=1.0, n_div=n_div) for _ in range(n))
+
+
 class C3(nn.Module):
     """CSP Bottleneck with 3 convolutions."""
 
@@ -478,6 +489,31 @@ class Bottleneck(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply bottleneck with optional shortcut connection."""
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
+
+class FasterBottleneck(nn.Module):
+    """Lightweight bottleneck using FasterNet-style partial convolution."""
+
+    def __init__(self, c1: int, c2: int, shortcut: bool = True, g: int = 1, e: float = 0.5, n_div: int = 4):
+        """Initialize a FasterNet-style bottleneck.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            shortcut (bool): Whether to use residual shortcut.
+            g (int): Kept for YAML/API compatibility.
+            e (float): Expansion ratio.
+            n_div (int): Channel split divisor for partial convolution.
+        """
+        super().__init__()
+        c_ = int(c2 * e)
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = PConv(c_, c2, k=3, s=1, n_div=n_div)
+        self.add = shortcut and c1 == c2
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply FasterNet-style bottleneck with optional shortcut."""
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 

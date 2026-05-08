@@ -33,6 +33,7 @@ from ultralytics.nn.modules import (
     C2f,
     C2fAttn,
     C2fCIB,
+    C2fFaster,
     C2fPSA,
     C3Ghost,
     C3k2,
@@ -47,6 +48,7 @@ from ultralytics.nn.modules import (
     Detect,
     DWConv,
     DWConvTranspose2d,
+    EMA,
     Focus,
     GhostBottleneck,
     GhostConv,
@@ -1590,6 +1592,7 @@ def parse_model(d, ch, verbose=True):
             C1,
             C2,
             C2f,
+            C2fFaster,
             C3k2,
             RepNCSPELAN4,
             ELAN1,
@@ -1616,6 +1619,7 @@ def parse_model(d, ch, verbose=True):
             C1,
             C2,
             C2f,
+            C2fFaster,
             C3k2,
             C2fAttn,
             C3,
@@ -1676,6 +1680,9 @@ def parse_model(d, ch, verbose=True):
             c2 = args[1] if args[3] else args[1] * 4
         elif m is torch.nn.BatchNorm2d:
             args = [ch[f]]
+        elif m is EMA:
+            c2 = ch[f]
+            args = [c2, *args]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         elif m in frozenset(
