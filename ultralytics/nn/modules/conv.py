@@ -18,10 +18,12 @@ __all__ = (
     "ConvTranspose",
     "DWConv",
     "DWConvTranspose2d",
+    "EMA",
     "Focus",
     "GhostConv",
     "Index",
     "LightConv",
+    "PConv",
     "RepConv",
     "SpatialAttention",
 )
@@ -197,6 +199,40 @@ class DWConv(Conv):
             act (bool | nn.Module): Activation function.
         """
         super().__init__(c1, c2, k, s, g=math.gcd(c1, c2), d=d, act=act)
+
+
+class PConv(nn.Module):
+    """Partial convolution block from FasterNet for faster spatial feature mixing.
+
+    Only a subset of channels goes through a 3x3 convolution, while the remaining channels bypass it. This keeps local
+    texture modeling for coal/gangue boundaries while reducing redundant spatial computation.
+    """
+
+    def __init__(self, c1, c2=None, k=3, s=1, n_div=4, act=True):
+        """Initialize PConv.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int, optional): Output channels. Defaults to c1.
+            k (int): Kernel size for partial spatial convolution.
+            s (int): Stride. Use 1 inside C2f-Faster blocks.
+            n_div (int): Channel split divisor. 4 means 1/4 channels are spatially convolved.
+            act (bool | nn.Module): Activation for optional projection.
+        """
+        super().__init__()
+        c2 = c2 or c1
+        self.dim_conv = max(c1 // n_div, 1)
+        self.dim_untouched = c1 - self.dim_conv
+        self.partial_conv = nn.Conv2d(self.dim_conv, self.dim_conv, k, s, autopad(k), bias=False)
+        self.bn = nn.BatchNorm2d(c1)
+        self.act = Conv.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
+        self.proj = Conv(c1, c2, 1, 1, act=act) if c1 != c2 or s != 1 else nn.Identity()
+
+    def forward(self, x):
+        """Apply partial spatial convolution followed by optional projection."""
+        x1, x2 = torch.split(x, [self.dim_conv, self.dim_untouched], dim=1)
+        x = torch.cat((self.partial_conv(x1), x2), dim=1)
+        return self.proj(self.act(self.bn(x)))
 
 
 class DWConvTranspose2d(nn.ConvTranspose2d):
@@ -611,6 +647,43 @@ class CBAM(nn.Module):
             (torch.Tensor): Attended output tensor.
         """
         return self.spatial_attention(self.channel_attention(x))
+
+
+class EMA(nn.Module):
+    """Efficient Multi-Scale Attention for spatial-texture feature refinement."""
+
+    def __init__(self, channels: int, factor: int = 8):
+        """Initialize EMA with grouped attention."""
+        super().__init__()
+        groups = min(factor, channels)
+        while channels % groups != 0 and groups > 1:
+            groups -= 1
+        self.groups = groups
+        group_channels = channels // groups
+        self.softmax = nn.Softmax(-1)
+        self.agp = nn.AdaptiveAvgPool2d((1, 1))
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+        self.gn = nn.GroupNorm(group_channels, group_channels)
+        self.conv1x1 = nn.Conv2d(group_channels, group_channels, kernel_size=1, stride=1, padding=0)
+        self.conv3x3 = nn.Conv2d(group_channels, group_channels, kernel_size=3, stride=1, padding=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply grouped multi-scale attention to input features."""
+        b, c, h, w = x.size()
+        group_x = x.reshape(b * self.groups, c // self.groups, h, w)
+        x_h = self.pool_h(group_x)
+        x_w = self.pool_w(group_x).permute(0, 1, 3, 2)
+        hw = self.conv1x1(torch.cat([x_h, x_w], dim=2))
+        x_h, x_w = torch.split(hw, [h, w], dim=2)
+        x1 = self.gn(group_x * x_h.sigmoid() * x_w.permute(0, 1, 3, 2).sigmoid())
+        x2 = self.conv3x3(group_x)
+        x11 = self.softmax(self.agp(x1).reshape(b * self.groups, -1, 1).permute(0, 2, 1))
+        x12 = x2.reshape(b * self.groups, c // self.groups, -1)
+        x21 = self.softmax(self.agp(x2).reshape(b * self.groups, -1, 1).permute(0, 2, 1))
+        x22 = x1.reshape(b * self.groups, c // self.groups, -1)
+        weights = (torch.matmul(x11, x12) + torch.matmul(x21, x22)).reshape(b * self.groups, 1, h, w)
+        return (group_x * weights.sigmoid()).reshape(b, c, h, w)
 
 
 class Concat(nn.Module):

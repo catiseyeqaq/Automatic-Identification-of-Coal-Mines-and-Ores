@@ -1,0 +1,12 @@
+train: train/images
+val: valid/images
+
+nc: 2
+names: ['coal', 'gangue']
+
+roboflow:
+  workspace: cat-bht1u
+  project: cat-bht1u
+  version: dataset
+  license: Private
+  url: https://app.roboflow.com/cat-bht1u/cat-bht1u/dataset
