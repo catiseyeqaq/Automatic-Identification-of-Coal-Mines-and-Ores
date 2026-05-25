@@ -4,7 +4,7 @@ torchvision>=0.9.0
 
 # Ultralytics framework dependencies
 numpy>=1.23.0
-matplotlib>=3.3.0
+matplotlib>=3.9.4
 opencv-python>=4.6.0
 pillow>=7.1.2
 pyyaml>=5.3.1
